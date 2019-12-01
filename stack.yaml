@@ -1,0 +1,3 @@
+packages:
+- 'day1'
+resolver: lts-14.10
