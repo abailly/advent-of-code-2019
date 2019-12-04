@@ -18,7 +18,7 @@ threeArgOp : List Integer -> (pc : Nat) -> (op : Integer -> Integer -> Integer) 
 threeArgOp ops pc op = let op1 = fromInteger $ ops !! (pc + 1)
                            op2 = fromInteger $ ops !! (pc + 2)
                            op3 = fromInteger $ ops !! (pc + 3)
-                           res = (ops !! op1) `op` (ops !! op2)
+                           res = ops !! op1 `op` ops !! op2
                            (l, r) = splitAt op3 ops
                        in Cont (l ++ (res :: drop 1 r)) (pc + 4)
 
@@ -55,8 +55,7 @@ search noun verb =
 
 run : () -> (Integer, Integer) -> IO ()
 run _ (n,v) = do
-  let out = search n v
-  if out == 19690720
+  if search n v == 19690720
   then do { putStrLn ("Found : " ++ show (100 * n + v)) ; exitWith ExitSuccess }
   else pure ()
 

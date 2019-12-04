@@ -142,8 +142,8 @@ single_step_to : Point -> (Bool, Integer) -> Segment -> (Bool, Integer)
 single_step_to x (True, b) seg = (True, b) -- stop accumulating once point is reached
 single_step_to x (False, b) seg =
   if point_on_segment x (norm seg)
-  then trace (show x ++ " on segment " ++ show seg ++ ", len = " ++ show (b + segmentLength (stop_segment_at seg x))) $ (True, b + segmentLength (stop_segment_at seg x))
-  else trace (show $ b + segmentLength (seg)) $ (False, b + segmentLength seg)
+  then (True, b + segmentLength (stop_segment_at seg x))
+  else (False, b + segmentLength seg)
 
 wire4 : Wire
 wire4 = [ U 98,R 91,D 20,R 16,D 67,R 40,U 7,R 15,U 6,R 7 ]
