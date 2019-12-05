@@ -1,3 +1,5 @@
 *.ibc
 *~
 *.ibc
+.stack-work/
+TAGS
