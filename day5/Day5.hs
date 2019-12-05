@@ -69,6 +69,25 @@ output  ops pc = do
   put (ops, pc + 2)
   pure Cont
 
+jump_if :: (Intcode m) => [Integer] -> Int -> (Integer -> Bool) -> m Result
+jump_if ops pc cmp = do
+  let [mode1, mode2] = argModes 2 (addr ops pc)
+      test = load mode1 ops (pc + 1)
+  if cmp test
+    then put (ops, fromIntegral $ load mode2 ops (pc + 2))
+    else put (ops, pc + 3)
+  pure Cont
+
+compare_and_set :: (Intcode m) => [Integer] -> Int -> (Integer -> Integer -> Bool) -> m Result
+compare_and_set ops pc cmp = do
+  let [mode1, mode2, mode3] = argModes 3 (addr ops pc)
+      op1 = load mode1 ops (pc + 1)
+      op2 = load mode2 ops (pc + 2)
+  if op1 `cmp` op2
+    then put (store mode3 ops (pc + 3) 1, pc + 4)
+    else put (store mode3 ops (pc + 3) 0, pc + 4)
+  pure Cont
+
 step :: (Intcode m) => m Result
 step = do
   (ops, pc) <- get
@@ -77,6 +96,10 @@ step = do
       2 -> threeArgOp ops pc (*)
       3 -> input ops pc
       4 -> output ops pc
+      5 -> jump_if ops pc (/= 0)
+      6 -> jump_if ops pc (== 0)
+      7 -> compare_and_set ops pc (<)
+      8 -> compare_and_set ops pc (==)
       99 -> pure $ Stop ops
       other -> pure $ Error $ "Uknown opcode " ++ show other
 
@@ -100,6 +123,9 @@ sample = [ 1,12,2,3,1,1,2,3,1,3,4,3,1,5,0,3,2,13,1,19,1,19,6,23
          , 10,119,123,1,2,123,127,1,127,6,0,99,2,14,0,0
          ]
 
+sample2 = [3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,
+           1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,
+           999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99]
 
 main :: IO ()
 main = do
