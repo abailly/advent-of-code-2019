@@ -1,17 +1,28 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 import Control.Monad.State
+import Control.Monad.Trans(liftIO)
 
-type Intcode a = State ([Integer], Int) a
+class MonadState ([Integer], Int) m => Intcode m where
+  inp :: m Integer
+  out :: Integer -> m ()
 
-getState :: Intcode ([Integer], Int)
-getState = get
+newtype VM a = VM { runVM :: StateT ([Integer], Int) IO a }
+  deriving (Functor, Applicative, Monad, MonadState ([Integer], Int), MonadIO)
+
+instance Intcode VM where
+  inp = read <$> liftIO getLine
+  out = liftIO . putStrLn . show
 
 data Result where
   Error :: String -> Result
   Stop :: [Integer] -> Result
   Cont :: Result
 
-threeArgOp :: [Integer] -> Int -> (Integer -> Integer -> Integer) -> Intcode Result
+threeArgOp :: (Intcode m) => [Integer] -> Int -> (Integer -> Integer -> Integer) -> m Result
 threeArgOp ops pc op = do
   let op1 = fromInteger $ ops !! (pc + 1)
       op2 = fromInteger $ ops !! (pc + 2)
@@ -21,31 +32,32 @@ threeArgOp ops pc op = do
   put ((l ++ (res : drop 1 r)), pc + 4)
   pure Cont
 
+input ::  (Intcode m) => [Integer] -> Int -> m Result
+input = undefined
 
-step :: Intcode Result
+output ::  (Intcode m) => [Integer] -> Int -> m Result
+output = undefined
+
+step :: (Intcode m) => m Result
 step = do
-  (ops, pc) <- getState
+  (ops, pc) <- get
   case ops !! pc of
       1 -> threeArgOp ops pc (+)
       2 -> threeArgOp ops pc (*)
+      3 -> input ops pc
+      4 -> output ops pc
       99 -> pure $ Stop ops
       other -> pure $ Error $ "Uknown opcode " ++ show other
 
-runProgram :: Intcode [Integer] -> [Integer] -> [Integer]
-runProgram action initState = fst $ execState action (initState, 0)
+program :: (Intcode m) => m [Integer]
+program = do
+  res <- step
+  case res of
+    Stop end -> pure end
+    Cont -> program
 
-program :: [Integer] -> [Integer]
-program = runProgram loop
-  where
-    loop :: Intcode [Integer]
-    loop = do
-      res <- step
-      case res of
-        Stop end -> pure end
-        Cont -> loop
-
-input :: [Integer]
-input = [1,12,2,3,1,1,2,3,1,3,4,3,1,5,0,3,2,13,1,19,1,19,6,23
+sample :: [Integer]
+sample = [1,12,2,3,1,1,2,3,1,3,4,3,1,5,0,3,2,13,1,19,1,19,6,23
         ,1,23,6,27,1,13,27,31,2,13,31,35,1,5,35,39,2,39,13,43
         ,1,10,43,47,2,13,47,51,1,6,51,55,2,55,13,59,1,59,10,63
         ,1,63,10,67,2,10,67,71,1,6,71,75,1,10,75,79,1,79,9,83
@@ -55,4 +67,6 @@ input = [1,12,2,3,1,1,2,3,1,3,4,3,1,5,0,3,2,13,1,19,1,19,6,23
         ]
 
 main :: IO ()
-main = putStrLn $ show $ program input
+main = do
+  res <- runStateT (runVM program) (sample, 0)
+  putStrLn $ show  res
