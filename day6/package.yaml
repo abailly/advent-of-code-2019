@@ -22,5 +22,6 @@ executables:
       - algebraic-graphs
       - base
       - bytestring
+      - containers
       - mtl
       - text
