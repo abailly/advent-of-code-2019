@@ -1,3 +1,4 @@
 packages:
 - 'day5'
+- 'day6'
 resolver: lts-14.10

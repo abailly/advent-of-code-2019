@@ -1,0 +1,26 @@
+name:                day6
+version:             0.1.0.0
+github:              "githubuser/saison3"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2019 Author name here"
+
+dependencies:
+- base >= 4.7 && < 5
+
+executables:
+  day6:
+    main:                Day6.hs
+    source-dirs:         .
+    ghc-options:
+    - -O3
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+      - algebraic-graphs
+      - base
+      - bytestring
+      - mtl
+      - text
