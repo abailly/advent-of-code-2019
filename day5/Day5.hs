@@ -83,9 +83,10 @@ compare_and_set ops pc cmp = do
   let [mode1, mode2, mode3] = argModes 3 (addr ops pc)
       op1 = load mode1 ops (pc + 1)
       op2 = load mode2 ops (pc + 2)
+      set x = store mode3 ops (pc + 3) x
   if op1 `cmp` op2
-    then put (store mode3 ops (pc + 3) 1, pc + 4)
-    else put (store mode3 ops (pc + 3) 0, pc + 4)
+    then put (set 1, pc + 4)
+    else put (set 0, pc + 4)
   pure Cont
 
 step :: (Intcode m) => m Result
