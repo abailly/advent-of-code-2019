@@ -41,7 +41,7 @@ bfs orbits to (Path p@(h : t) :<| rest) visited
 minimumTransfers :: Orbits -> (Int, [Text])
 minimumTransfers orbits =
   let from = elemAt 0 $ postSet "YOU" orbits
-      to = elemAt 0 $ postSet "SAN" orbits
+      to   = elemAt 0 $ postSet "SAN" orbits
       refl = symmetricClosure orbits
       path = bfs refl to (S.singleton $ Path [from]) mempty
   in (length path - 1, path)

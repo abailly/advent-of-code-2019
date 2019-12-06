@@ -4,19 +4,48 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 import Control.Monad.State
+import Control.Arrow
 import Control.Monad.Trans(liftIO)
 import System.Environment
 
-class MonadState ([Integer], Int) m => Intcode m where
+class Monad m => Intcode m where
   inp :: m Integer
   out :: Integer -> m ()
+
+  mem :: m [Integer]
+  flash :: [Integer] -> m ()
+
+  ip :: m Int
+  move :: Int -> m ()
+  jmp :: Int -> m ()
+
+  load :: ArgMode -> Int -> m Integer
+  load Position ip = do
+    ops <- mem
+    pure $ ops !! addr ops ip
+  load Immediate ip = do
+    ops <- mem
+    pure $ addr ops ip
+
+  store :: ArgMode -> Int -> Integer -> m [Integer]
+  store Position ip res = do
+    ops <- mem
+    let (l,r) = splitAt (addr ops ip) ops
+        ops' = l ++ (res : drop 1 r)
+    flash ops'
+    pure ops'
 
 newtype VM a = VM { runVM :: StateT ([Integer], Int) IO a }
   deriving (Functor, Applicative, Monad, MonadState ([Integer], Int), MonadIO)
 
 instance Intcode VM where
-  inp = read <$> liftIO getLine
-  out = liftIO . putStrLn . show
+  inp        = read <$> liftIO getLine
+  out        = liftIO . putStrLn . show
+  mem        = fst <$> get
+  ip         = snd <$> get
+  move ip'   = modify (second (+ ip'))
+  jmp ip     = modify (second (const ip))
+  flash ops' = modify (first (const ops'))
 
 data Result where
   Error :: String -> Result
@@ -26,15 +55,6 @@ data Result where
 data ArgMode = Position | Immediate
   deriving (Enum, Show)
 
-load :: ArgMode -> [Integer] -> Int -> Integer
-load Position ops ip = ops !! addr ops ip
-load Immediate ops ip = addr ops ip
-
-store :: ArgMode -> [Integer] -> Int -> Integer -> [Integer]
-store Position ops ip res =
-  let (l,r) = splitAt (addr ops ip) ops
-  in l ++ (res : drop 1 r)
-
 addr ops ip = fromInteger $ ops !! ip
 
 argModes :: Int -> Integer -> [ArgMode]
@@ -43,64 +63,69 @@ argModes numArgs opcode =
       digits = toEnum . read . pure <$> show modes
   in reverse $ replicate (numArgs - length digits) Position ++ digits
 
-threeArgOp :: (Intcode m) => [Integer] -> Int -> (Integer -> Integer -> Integer) -> m Result
-threeArgOp ops pc op = do
+threeArgOp :: (Intcode m) => Int -> (Integer -> Integer -> Integer) -> m Result
+threeArgOp pc op = do
+  ops <- mem
   let [mode1, mode2, mode3 ] = argModes 3 (addr ops pc)
-      op1 = load mode1 ops (pc + 1)
-      op2 = load mode2 ops (pc + 2)
-      res = op1 `op` op2
-      ops' = store mode3 ops (pc + 3) res
-  put (ops', pc + 4)
+  op1 <- load mode1 (pc + 1)
+  op2 <- load mode2 (pc + 2)
+  store mode3 (pc + 3) (op1 `op` op2)
+  move 4
   pure Cont
 
-input ::  (Intcode m) => [Integer] -> Int -> m Result
-input ops pc = do
+input ::  (Intcode m) => Int -> m Result
+input pc = do
+  ops <- mem
   i <- inp
   let [mode] = argModes 1 (addr ops pc)
-      ops' = store mode ops (pc + 1) i
-  put (ops', pc + 2)
+  store mode (pc + 1) i
+  move 2
   pure Cont
 
-output ::  (Intcode m) => [Integer] -> Int -> m Result
-output  ops pc = do
+output ::  (Intcode m) => Int -> m Result
+output  pc = do
+  ops <- mem
   let [mode] = argModes 1 (addr ops pc)
-      val = load mode ops (pc + 1)
+  val <- load mode (pc + 1)
   out val
-  put (ops, pc + 2)
+  move 2
   pure Cont
 
-jump_if :: (Intcode m) => [Integer] -> Int -> (Integer -> Bool) -> m Result
-jump_if ops pc cmp = do
+jump_if :: (Intcode m) => Int -> (Integer -> Bool) -> m Result
+jump_if pc cmp = do
+  ops <- mem
   let [mode1, mode2] = argModes 2 (addr ops pc)
-      test = load mode1 ops (pc + 1)
+  test <- load mode1 (pc + 1)
   if cmp test
-    then put (ops, fromIntegral $ load mode2 ops (pc + 2))
-    else put (ops, pc + 3)
+    then load mode2 (pc + 2) >>= jmp . fromIntegral
+    else move 3
   pure Cont
 
-compare_and_set :: (Intcode m) => [Integer] -> Int -> (Integer -> Integer -> Bool) -> m Result
-compare_and_set ops pc cmp = do
+compare_and_set :: (Intcode m) => Int -> (Integer -> Integer -> Bool) -> m Result
+compare_and_set pc cmp = do
+  ops <- mem
   let [mode1, mode2, mode3] = argModes 3 (addr ops pc)
-      op1 = load mode1 ops (pc + 1)
-      op2 = load mode2 ops (pc + 2)
-      set x = store mode3 ops (pc + 3) x
+  op1 <- load mode1 (pc + 1)
+  op2 <- load mode2 (pc + 2)
+  let set x = store mode3 (pc + 3) x
   if op1 `cmp` op2
-    then put (set 1, pc + 4)
-    else put (set 0, pc + 4)
+    then set 1 >> move 4
+    else set 0 >> move 4
   pure Cont
 
 step :: (Intcode m) => m Result
 step = do
-  (ops, pc) <- get
+  ops <- mem
+  pc <- ip
   case (ops !! pc `mod` 100) of
-      1 -> threeArgOp ops pc (+)
-      2 -> threeArgOp ops pc (*)
-      3 -> input ops pc
-      4 -> output ops pc
-      5 -> jump_if ops pc (/= 0)
-      6 -> jump_if ops pc (== 0)
-      7 -> compare_and_set ops pc (<)
-      8 -> compare_and_set ops pc (==)
+      1 -> threeArgOp pc (+)
+      2 -> threeArgOp pc (*)
+      3 -> input pc
+      4 -> output pc
+      5 -> jump_if pc (/= 0)
+      6 -> jump_if pc (== 0)
+      7 -> compare_and_set pc (<)
+      8 -> compare_and_set pc (==)
       99 -> pure $ Stop ops
       other -> pure $ Error $ "Uknown opcode " ++ show other
 
