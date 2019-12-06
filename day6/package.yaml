@@ -23,5 +23,6 @@ executables:
       - base
       - bytestring
       - containers
+      - heap
       - mtl
       - text
