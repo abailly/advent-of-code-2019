@@ -43,7 +43,7 @@ minimumTransfers orbits =
   let from = elemAt 0 $ postSet "YOU" orbits
       to = elemAt 0 $ postSet "SAN" orbits
       refl = symmetricClosure orbits
-      path = bfs orbits to (S.singleton $ Path [from]) mempty
+      path = bfs refl to (S.singleton $ Path [from]) mempty
   in (length path - 1, path)
 
 -- * Parsing Orbits file
