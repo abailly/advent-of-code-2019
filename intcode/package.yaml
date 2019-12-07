@@ -1,0 +1,20 @@
+name:                intcode
+version:             0.1.0.0
+github:              "githubuser/saison3"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2019 Author name here"
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  ghc-options:
+  - -O3
+  - -Wall
+  - -Werror
+  exposed-modules:
+  - Intcode
+  dependencies:
+  - base

@@ -7,7 +7,8 @@ maintainer:          "example@example.com"
 copyright:           "2019 Author name here"
 
 dependencies:
-- base >= 4.7 && < 5
+- base
+- intcode
 
 executables:
   day7:
@@ -19,12 +20,11 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-      - algebraic-graphs
-      - async
-      - base
-      - bytestring
-      - containers
-      - heap
-      - lens
-      - mtl
-      - text
+    - algebraic-graphs
+    - async
+    - bytestring
+    - containers
+    - heap
+    - lens
+    - mtl
+    - text
