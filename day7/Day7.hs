@@ -26,10 +26,11 @@ argModes numArgs opcode =
       digits = toEnum . read . pure <$> show modes
   in reverse $ replicate (numArgs - length digits) Position ++ digits
 
-class Monad m => Intcode m where
+class Monad m => IOM m where
   inp :: m Integer
   out :: Integer -> m ()
 
+class IOM m => Intcode m where
   mem :: m [Integer]
   flash :: [Integer] -> m ()
 
@@ -53,31 +54,6 @@ class Monad m => Intcode m where
     flash ops'
     pure ops'
 
-data Machine = Machine { _ram :: [Integer]
-                       , _eip :: Int
-                       , _cin :: [Integer]
-                       , _cout :: [Integer]
-                       }
-
-$(makeLenses ''Machine)
-
-newtype VM a = VM { runVM :: State Machine a }
-  deriving (Functor, Applicative, Monad, MonadState Machine)
-
-instance MonadFail VM where
-  fail = error
-
-instance Intcode VM where
-  inp        = do
-    (x:xs) <- gets _cin
-    cin .= xs
-    pure x
-  out      x = cout %= (x:)
-  mem        = gets _ram
-  ip         = gets _eip
-  move ip'   = eip %= (+ ip')
-  jmp ip     = eip .= ip
-  flash ops' = ram .= ops'
 
 data Result where
   Error :: String -> Result
@@ -173,7 +149,48 @@ sample2 = [3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,
            1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,
            999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99]
 
-run initial ins = runState (runVM program) $ Machine initial 0 ins []
+data IOS = IOS { _cin :: [Integer]
+               , _cout :: [Integer]
+               }
+
+data Machine = Machine { _ram :: [Integer]
+                       , _eip :: Int
+                       }
+
+$(makeLenses ''IOS)
+$(makeLenses ''Machine)
+
+newtype IOSM a = IOSM { runIOSM :: State IOS a }
+  deriving (Functor, Applicative, Monad, MonadState IOS)
+
+instance MonadFail IOSM where
+  fail = error
+
+instance IOM IOSM where
+  inp = do
+    (x:xs) <- gets _cin
+    cin .= xs
+    pure x
+  out      x = cout %= (x:)
+
+newtype VM m a = VM { runVM :: StateT Machine m a }
+  deriving (Functor, Applicative, Monad, MonadState Machine, MonadTrans)
+
+instance (Monad m) => MonadFail (VM m) where
+  fail = error
+
+instance IOM m => IOM (VM m) where
+  inp = lift inp
+  out = lift . out
+
+instance IOM m => Intcode (VM m) where
+  mem        = gets _ram
+  ip         = gets _eip
+  move ip'   = eip %= (+ ip')
+  jmp ip     = eip .= ip
+  flash ops' = ram .= ops'
+
+run initial ins = runState (runIOSM (runStateT (runVM program) (Machine initial 0))) (IOS ins [])
 
 phase :: [Integer] -> Integer -> Integer -> Integer
 phase prog input setting =
