@@ -4,6 +4,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 
+import Control.Monad.Reader
+import Control.Concurrent.Async
+import Control.Concurrent.Chan
 import Control.Monad.Fail
 import Control.Monad.State
 import Control.Arrow
@@ -135,49 +138,29 @@ program = do
     Cont -> program
     Error err -> error err
 
-sample :: [Integer]
-sample = [ 1,12,2,3,1,1,2,3,1,3,4,3,1,5,0,3,2,13,1,19,1,19,6,23
-         , 1,23,6,27,1,13,27,31,2,13,31,35,1,5,35,39,2,39,13,43
-         , 1,10,43,47,2,13,47,51,1,6,51,55,2,55,13,59,1,59,10,63
-         , 1,63,10,67,2,10,67,71,1,6,71,75,1,10,75,79,1,79,9,83
-         , 2,83,6,87,2,87,9,91,1,5,91,95,1,6,95,99,1,99,9,103
-         , 2,10,103,107,1,107,6,111,2,9,111,115,1,5,115,119,1
-         , 10,119,123,1,2,123,127,1,127,6,0,99,2,14,0,0
-         ]
-
-sample2 = [3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,
-           1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,
-           999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99]
-
-data IOS = IOS { _cin :: [Integer]
-               , _cout :: [Integer]
+-- * I/O based on channels
+data IOS = IOS { _cin :: Chan Integer
+               , _cout :: Chan Integer
                }
 
+$(makeLenses ''IOS)
+
+newtype IOSM a = IOSM { runIOSM :: ReaderT IOS IO a }
+  deriving (Functor, Applicative, Monad, MonadReader IOS, MonadIO)
+
+instance IOM IOSM where
+  inp = asks _cin >>= liftIO . readChan
+  out x = asks _cout >>= liftIO . flip writeChan x
+
+-- * Core machine
 data Machine = Machine { _ram :: [Integer]
                        , _eip :: Int
                        }
 
-$(makeLenses ''IOS)
 $(makeLenses ''Machine)
-
-newtype IOSM a = IOSM { runIOSM :: State IOS a }
-  deriving (Functor, Applicative, Monad, MonadState IOS)
-
-instance MonadFail IOSM where
-  fail = error
-
-instance IOM IOSM where
-  inp = do
-    (x:xs) <- gets _cin
-    cin .= xs
-    pure x
-  out      x = cout %= (x:)
 
 newtype VM m a = VM { runVM :: StateT Machine m a }
   deriving (Functor, Applicative, Monad, MonadState Machine, MonadTrans)
-
-instance (Monad m) => MonadFail (VM m) where
-  fail = error
 
 instance IOM m => IOM (VM m) where
   inp = lift inp
@@ -190,24 +173,35 @@ instance IOM m => Intcode (VM m) where
   jmp ip     = eip .= ip
   flash ops' = ram .= ops'
 
-run initial ins = runState (runIOSM (runStateT (runVM program) (Machine initial 0))) (IOS ins [])
+-- | Run a program asynchronously with given input and output channels
+run :: [Integer] -> Chan Integer -> Chan Integer -> IO (Async ([Integer], Machine))
+run initial cin cout =
+  async $ runReaderT (runIOSM (runStateT (runVM program) (Machine initial 0))) (IOS cin cout)
 
-phase :: [Integer] -> Integer -> Integer -> Integer
-phase prog input setting =
-  let [out] = _cout $ snd $ run prog [setting, input]
-  in out
+-- | Compute thruster signal using given prog and list of settings
+-- The programs are run asynchronously using ports
+thrusterSignal :: [Integer] -> [Integer] -> IO Integer
+thrusterSignal prog settings = do
+  chans <- initialiseChannels
+  progs <- startAllPhasers chans
+  injectSettings chans
+  startComputation chans
+  waitAny progs
+  readChan (head chans)
+  where
+    initialiseChannels = forM [1 .. length settings] (const newChan)
+    startAllPhasers chans = forM (zip chans $ tail (cycle chans)) $ uncurry (run prog)
+    injectSettings chans = forM_ (zip settings chans) $ \ (s, cin) -> writeChan cin s
+    startComputation chans =  writeChan (head chans) 0
 
-thrusterSignal :: [Integer] -> [Integer] -> Integer
-thrusterSignal prog settings = foldl (phase prog) 0 settings
-
-maxThrusterSettings :: [Integer] -> (Integer, [Integer])
-maxThrusterSettings prog =
-  let ins = permutations [0,1,2,3,4]
-      res = zip (fmap (thrusterSignal prog) ins) ins
-  in second reverse $ head $ reverse $ sort res
+maxThrusterSettings :: [Integer] -> IO (Integer, [Integer])
+maxThrusterSettings prog = do
+  let ins = permutations [5,6,7,8,9]
+  res <- forM ins $ \ settings -> thrusterSignal prog settings
+  pure $ head $ reverse $ sort (zip res ins)
 
 main :: IO ()
 main = do
   [arg] <- getArgs
   prog <- read <$> (readFile arg >>= \ nums -> pure $ "[" <> nums <> "]")
-  putStrLn $ show $ maxThrusterSettings prog
+  print =<< maxThrusterSettings prog
