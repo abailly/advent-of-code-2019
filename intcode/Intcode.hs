@@ -27,6 +27,12 @@ class Monad m => IOM m where
   -- | Write a single value to output port
   out :: Integer -> m ()
 
+-- | Basic instance using `stdin` and `stdout` to do I/O
+instance IOM IO where
+  inp = read <$> getLine
+  out = putStrLn . show
+
+
 -- |Low-level interface for /Intcode/ machine
 -- All operations of the Intcode machine are built upon those
 -- low-level operations (akin to a CPU's microcode?)
@@ -76,8 +82,8 @@ load Immediate ptr = peek ptr
 -- | Store given value at given address
 -- It is an error to store a value in `Immediate` mode
 store :: Intcode m => ArgMode -> Int -> Integer -> m ()
-store Immediate ptr _ = fail $ "Immediate mode not supported for 'store' instruction at " <> show ptr
 store Position ptr res = poke ptr res
+store Immediate ptr _ = fail $ "Immediate mode not supported for 'store' instruction at " <> show ptr
 
 
 -- | Running status of a machine
@@ -89,65 +95,84 @@ data Status where
   -- | Program is running
   Running :: Status
 
-threeArgOp :: (Intcode m) => (Integer -> Integer -> Integer) -> m ()
-threeArgOp op = do
-  pc <- ip
-  [mode1, mode2, mode3 ] <- argModes 3 <$> peek pc
-  op1 <- load mode1 (pc + 1)
-  op2 <- load mode2 (pc + 2)
-  store mode3 (pc + 3) (op1 `op` op2)
+threeArgOp :: (Intcode m) => Arg -> Arg -> Arg -> (Integer -> Integer -> Integer) -> m ()
+threeArgOp arg1 arg2 arg3 op = do
+  op1 <- uncurry load arg1
+  op2 <- uncurry load arg2
+  uncurry store arg3 (op1 `op` op2)
   move 4
 
-input ::  (Intcode m) => m ()
-input = do
-  pc <- ip
-  i <- inp
-  [mode] <- argModes 1 <$> peek pc
-  store mode (pc + 1) i
-  move 2
+input ::  (Intcode m) => Arg -> m ()
+input arg = inp >>= uncurry store arg >> move 2
 
-output ::  (Intcode m) => m ()
-output = do
-  pc <- ip
-  [mode] <- argModes 1 <$> peek pc
-  val <- load mode (pc + 1)
-  out val
-  move 2
+output ::  (Intcode m) => Arg -> m ()
+output arg = uncurry load arg >>= out >> move 2
 
-jump_if :: (Intcode m) => (Integer -> Bool) -> m ()
-jump_if cmp = do
-  pc <- ip
-  [mode1, mode2] <- argModes 2 <$> peek pc
-  test <- load mode1 (pc + 1)
+jump_if :: (Intcode m) => Arg -> Arg -> (Integer -> Bool) -> m ()
+jump_if arg1 arg2 cmp = do
+  test <- uncurry load arg1
   if cmp test
-    then load mode2 (pc + 2) >>= jmp . fromIntegral
+    then uncurry load arg2 >>= jmp . fromIntegral
     else move 3
 
-compare_and_set :: (Intcode m) => (Integer -> Integer -> Bool) -> m ()
-compare_and_set cmp = do
-  pc <- ip
-  [mode1, mode2, mode3] <- argModes 3 <$> peek pc
-  op1 <- load mode1 (pc + 1)
-  op2 <- load mode2 (pc + 2)
-  let set x = store mode3 (pc + 3) x
+compare_and_set :: (Intcode m) => Arg -> Arg -> Arg -> (Integer -> Integer -> Bool) -> m ()
+compare_and_set arg1 arg2 arg3 cmp = do
+  op1 <- uncurry load arg1
+  op2 <- uncurry load arg2
+  let set = uncurry store arg3
   if op1 `cmp` op2
     then set 1 >> move 4
     else set 0 >> move 4
 
-step :: (Intcode m) => m ()
-step = do
-  opcode <- ip >>= peek
+
+type Arg = (ArgMode, Int)
+
+mkArgs :: Int -> Integer -> Int -> [Arg]
+mkArgs n opcode pc =
+  let modes = argModes n opcode
+  in  zip modes [ pc+1 .. ]
+
+plus :: Intcode m => Arg -> Arg -> Arg -> m ()
+plus arg1 arg2 arg3 = threeArgOp arg1 arg2 arg3 (+)
+
+mult :: Intcode m => Arg -> Arg -> Arg -> m ()
+mult arg1 arg2 arg3 = threeArgOp arg1 arg2 arg3 (*)
+
+jnz :: Intcode m => Arg -> Arg -> m ()
+jnz arg1 arg2 = jump_if arg1 arg2 (/= 0)
+
+jz :: Intcode m => Arg -> Arg -> m ()
+jz arg1 arg2 = jump_if arg1 arg2 (== 0)
+
+cmplt :: Intcode m => Arg -> Arg -> Arg -> m ()
+cmplt arg1 arg2 arg3 = compare_and_set arg1 arg2 arg3 (<)
+
+cmpeq :: Intcode m => Arg -> Arg -> Arg -> m ()
+cmpeq arg1 arg2 arg3 = compare_and_set arg1 arg2 arg3 (==)
+
+step :: (Intcode m) => Integer -> Int -> m ()
+step opcode pc =
   case (opcode `mod` 100) of
-      1 -> threeArgOp (+)
-      2 -> threeArgOp (*)
-      3 -> input
-      4 -> output
-      5 -> jump_if (/= 0)
-      6 -> jump_if (== 0)
-      7 -> compare_and_set (<)
-      8 -> compare_and_set (==)
-      99 -> halt
-      other -> fail $ "Uknown opcode " ++ show other
+    1 -> let [arg1, arg2, arg3] = mkArgs 3 opcode pc
+         in plus arg1 arg2 arg3
+    2 -> let [arg1, arg2, arg3] = mkArgs 3 opcode pc
+         in mult arg1 arg2 arg3
+    3 -> let [arg1] = mkArgs 1 opcode pc
+         in input arg1
+    4 -> let [arg1] = mkArgs 1 opcode pc
+         in output arg1
+    5 -> let [arg1, arg2] = mkArgs 2 opcode pc
+         in jnz arg1 arg2
+    6 -> let [arg1, arg2] = mkArgs 2 opcode pc
+         in jz arg1 arg2
+    7 -> let [arg1, arg2, arg3] = mkArgs 3 opcode pc
+         in cmplt arg1 arg2 arg3
+    8 -> let [arg1, arg2, arg3] = mkArgs 3 opcode pc
+         in cmpeq arg1 arg2 arg3
+    99 -> halt
+    other -> do
+      mem <- core
+      fail $ "Uknown opcode " ++ show other ++ " ip=" ++ show pc ++ ", core dump=" ++ show mem
 
 -- | Run a machine until it halts or errors
 program :: (Intcode m) => m [Integer]
@@ -155,5 +180,9 @@ program = do
   res <- status
   case res of
     Halted      -> core
-    Running     -> step >> program
+    Running     -> do
+      pc <- ip
+      opcode <- peek pc
+      step opcode pc
+      program
     Errored err -> fail err
