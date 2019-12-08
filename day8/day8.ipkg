@@ -1,0 +1,8 @@
+package idris2
+
+modules = Day8
+makefile = Makefile
+objs = image.o
+executable = day8
+
+main = Day8
