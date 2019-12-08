@@ -1,17 +1,11 @@
 #include "image.h"
 #include <stdio.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <limits.h>
-
-typedef struct image {
-  char *data;
-  off_t size;
-  int width;
-  int height;
-} image;
 
 
 void *image_alloc (size_t sz) {
@@ -75,17 +69,47 @@ int layer_with_fewer_digits(image *img, char digit) {
   return min_layer;
 }
 
-int main (int argc, char **argv) {
-  char *fname = argv[1];
-  int w = atoi(argv[2]);
-  int h = atoi(argv[3]);
+char pixel_at(image *img, int x, int y, int z) {
+  int layer_sz = img->width * img->height;
 
-  image *img = read_image(fname, w, h);
-  printf("image:  %lld (%d x %d)\n", img->size, img->width, img->height);
+  return img->data[(z * layer_sz) + y * (img->width) + x];
+}
 
-  int layer = layer_with_fewer_digits(img, '0');
+void decode_image(image *img, char *decode) {
+  int num_layers = number_of_layers(img);
+  int w = img->width;
+  int h = img->height;
 
-  printf("layer %d : %d\n", layer, number_of(img, layer, '1') * number_of(img, layer, '2'));
+  for(int i =0; i < w; i++) {
+    for(int j =0; j < h; j++) {
+      for(int k=0; k < num_layers; k++) {
+        int px = pixel_at(img, i, j, k);
+        if(px != '2') {
+          decode[i + j * w] = px;
+          break;
+        }
+      }
+    }
+  }
+}
 
-  return 0;
+
+void display_image(image *img, char *decoded, int fd) {
+  char output[img->height][img->width + 1];
+  int w = img->width;
+  int h = img->height;
+
+
+  for(int j =0; j < h; j++) {
+    int i;
+    for(i =0; i < w; i++) {
+      if(decoded[i + (j * w) ] == '1') {
+        output[j][i] = ' ';
+      } else {
+        output[j][i] = '#';
+      }
+    }
+    output[j][i] = '\n';
+    write(fd, &output[j], w + 1);
+  }
 }
